@@ -52,7 +52,21 @@ jobs:
         working-directory: website
 
       - name: Build with Next.js
-        run: pnpm run build
+        run: |
+          export NODE_ENV=production
+          export NEXT_TELEMETRY_DISABLED=1
+          pnpm run build
+        working-directory: website
+        env:
+          NODE_ENV: production
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Verify build output
+        run: |
+          echo "Checking build output..."
+          ls -la out/
+          echo "Checking for CSS files..."
+          find out/ -name "*.css" -type f
         working-directory: website
 
       - name: Upload artifact
