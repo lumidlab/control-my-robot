@@ -1,4 +1,4 @@
-name: Deploy Next.js site (pnpm) in `website/` to GitHub Pages
+name: Deploy Next.js site to Pages
 
 on:
   push:
@@ -17,50 +17,30 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: website
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js with pnpm cache
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: pnpm
-          cache-dependency-path: website/pnpm-lock.yaml
-
-      - name: Install pnpm CLI
-        uses: pnpm/action-setup@v2
-        with:
-          version: v7
-
-      - name: Configure Pages for Next.js
-        uses: actions/configure-pages@v5
-        with:
-          static_site_generator: next
-
-      - name: Restore Next.js build cache
-        uses: actions/cache@v4
-        with:
-          path: website/.next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('website/pnpm-lock.yaml') }}-${{ hashFiles('website/**/*.[jt]s','website/**/*.[jt]sx') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('website/pnpm-lock.yaml') }}-
+          cache: npm
+          cache-dependency-path: website/package-lock.json
 
       - name: Install dependencies
-        run: pnpm install
+        run: npm ci --force
+        working-directory: website
 
-      - name: Build & export
-        run: |
-          pnpm exec next build
-          pnpm exec next export -o out
+      - name: Build with Next.js
+        run: npm run build
+        working-directory: website
 
-      - name: Upload Pages artifact
+      - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: website/out
+          path: website/out  # Output directory for static export
 
   deploy:
     needs: build
@@ -68,6 +48,7 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
