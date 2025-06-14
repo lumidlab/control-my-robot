@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { scsServoSDK } from 'feetech.js';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
-import { Zap, Power, PowerOff, RotateCcw, Plus, Minus } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Zap, Power, PowerOff, RotateCcw, Plus, Minus, Video, VideoOff } from "lucide-react";
 
 // Add Web Serial API types
 declare global {
@@ -41,6 +42,14 @@ export default function Home() {
   const [servos, setServos] = useState<Map<number, ServoData>>(new Map());
   const [availableServoIds, setAvailableServoIds] = useState<number[]>([1, 2, 3, 4, 5, 6]);
   const [originalPositions, setOriginalPositions] = useState<{ [key: number]: number }>({});
+  
+  // Camera state
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
+  const [selectedCamera, setSelectedCamera] = useState<string>('');
+  const [isCameraStreaming, setIsCameraStreaming] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   // Initialize default servo data
   useEffect(() => {
@@ -73,6 +82,16 @@ export default function Home() {
     };
 
     checkWebSerialSupport();
+    
+    // Enumerate available cameras
+    enumerateCameras();
+    
+    // Cleanup function to stop camera stream on unmount
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
   }, []);
 
   const connectToServo = async () => {
@@ -342,9 +361,92 @@ export default function Home() {
 
   const getCurrentServo = (servoId: number) => servos.get(servoId);
 
+  const enumerateCameras = async () => {
+    try {
+      // Request permission to access media devices
+      await navigator.mediaDevices.getUserMedia({ video: true });
+      
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter(device => device.kind === 'videoinput');
+      
+      setAvailableCameras(cameras);
+      console.log('Available cameras:', cameras);
+      
+      // Auto-select first camera if available
+      if (cameras.length > 0 && !selectedCamera) {
+        setSelectedCamera(cameras[0].deviceId);
+      }
+    } catch (err) {
+      console.error('Error enumerating cameras:', err);
+      setCameraError('Failed to access camera devices. Please check permissions.');
+    }
+  };
+
+  const startCameraStream = async () => {
+    if (!selectedCamera) {
+      setCameraError('Please select a camera first');
+      return;
+    }
+
+    try {
+      setCameraError(null);
+      
+      // Stop any existing stream
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+
+      const constraints = {
+        video: {
+          deviceId: { exact: selectedCamera },
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+        setIsCameraStreaming(true);
+        console.log('Camera stream started');
+      }
+    } catch (err) {
+      console.error('Error starting camera stream:', err);
+      setCameraError(`Failed to start camera stream: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setIsCameraStreaming(false);
+    }
+  };
+
+  const stopCameraStream = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    
+    setIsCameraStreaming(false);
+    console.log('Camera stream stopped');
+  };
+
+  const handleCameraChange = (deviceId: string) => {
+    setSelectedCamera(deviceId);
+    
+    // If currently streaming, restart with new camera
+    if (isCameraStreaming) {
+      stopCameraStream();
+      setTimeout(() => startCameraStream(), 100);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}
         <div className="text-center">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">🤖 Motor Control Panel</h1>
@@ -462,86 +564,156 @@ export default function Home() {
                 </div>
               </div>
               
-              {availableServoIds.map((servoId) => {
-                const servo = getCurrentServo(servoId);
-                const currentPosition = servo?.position ?? 2048;
-                const isConnected = servo?.position !== null;
-                
-                return (
-                  <div key={servoId} className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
-                    <div className="w-24 text-center">
-                      <div className="font-bold text-lg">Motor {servoId}</div>
-                      <div className="text-sm text-gray-600">
-                        Current: {isConnected && servo ? servo.position : 'N/A'}
+              {/* Main Content - Motor Controls and Camera Side by Side */}
+              <div className="flex gap-6">
+                {/* Left Side - Motor Controls */}
+                <div className="flex-1 space-y-4">
+                  {availableServoIds.map((servoId) => {
+                    const servo = getCurrentServo(servoId);
+                    const currentPosition = servo?.position ?? 2048;
+                    const isConnected = servo?.position !== null;
+                    
+                    return (
+                      <div key={servoId} className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
+                        <div className="w-24 text-center">
+                          <div className="font-bold text-lg">Motor {servoId}</div>
+                          <div className="text-sm text-gray-600">
+                            Current: {isConnected && servo ? servo.position : 'N/A'}
+                          </div>
+                          {originalPositions[servoId] !== undefined && (
+                            <div className="text-xs text-blue-600">
+                              Original: {originalPositions[servoId]}
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          <Button
+                            onClick={() => {
+                              if (isConnected) {
+                                moveServoToPosition(servoId, Math.max(0, currentPosition - 100));
+                              }
+                            }}
+                            disabled={isLoading || !isConnected}
+                            variant="outline"
+                            size="sm"
+                            className="w-10 h-10 p-0"
+                          >
+                            <Minus className="h-4 w-4" />
+                          </Button>
+                          
+                          <div className="flex-1 min-w-[200px]">
+                            <Slider
+                              value={[currentPosition]}
+                              onValueChange={(value) => {
+                                if (isConnected) {
+                                  moveServoToPosition(servoId, value[0]);
+                                }
+                              }}
+                              max={4095}
+                              min={0}
+                              step={1}
+                              className="w-full"
+                            />
+                            <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                              <span>0</span>
+                              <span>2048</span>
+                              <span>4095</span>
+                            </div>
+                          </div>
+                          
+                          <Button
+                            onClick={() => {
+                              if (isConnected) {
+                                moveServoToPosition(servoId, Math.min(4095, currentPosition + 100));
+                              }
+                            }}
+                            disabled={isLoading || !isConnected}
+                            variant="outline"
+                            size="sm"
+                            className="w-10 h-10 p-0"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        
+                        <div className="w-16 text-center">
+                          <div className={`w-3 h-3 rounded-full mx-auto mb-1 ${
+                            isConnected ? 'bg-green-500' : 'bg-red-500'
+                          }`}></div>
+                          <div className="text-xs text-gray-600">
+                            {isConnected ? 'Connected' : 'Offline'}
+                          </div>
+                        </div>
                       </div>
-                      {originalPositions[servoId] !== undefined && (
-                        <div className="text-xs text-blue-600">
-                          Original: {originalPositions[servoId]}
+                    );
+                  })}
+                </div>
+                
+                {/* Right Side - Camera Stream */}
+                <div className="w-96 flex-shrink-0">
+                  <div className="border flex flex-col items-center rounded-lg p-4 bg-gray-50">
+                      <div className="flex items-center gap-2">
+                        <Video className="h-5 w-5 text-blue-600" />
+                        <h3 className="text-lg font-semibold">Robot Camera</h3>
+                      </div>
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <Select value={selectedCamera} onValueChange={handleCameraChange}>
+                          <SelectTrigger className="w-48">
+                            <SelectValue placeholder="Select camera" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableCameras.map((camera) => (
+                              <SelectItem key={camera.deviceId} value={camera.deviceId}>
+                                {camera.label || `Camera ${camera.deviceId.slice(0, 8)}...`}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          onClick={isCameraStreaming ? stopCameraStream : startCameraStream}
+                          disabled={!selectedCamera}
+                          variant="outline"
+                          size="sm"
+                          className={isCameraStreaming ? "bg-red-50 hover:bg-red-100 text-red-700 border-red-200" : "bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"}
+                        >
+                          {isCameraStreaming ? (
+                            <VideoOff className="h-4 w-4" />
+                          ) : (
+                            <Video className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                    
+                    {cameraError && (
+                      <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                        <p className="text-red-700 text-sm">{cameraError}</p>
+                      </div>
+                    )}
+                    
+                    <div className="relative bg-black rounded-lg overflow-hidden" style={{ aspectRatio: '4/3' }}>
+                      <video
+                        ref={videoRef}
+                        className="w-full h-full object-contain transform scale-x-[-1]"
+                        autoPlay
+                        muted
+                        playsInline
+                      />
+                      {!isCameraStreaming && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+                          <div className="text-center text-gray-400">
+                            <Video className="h-12 w-12 mx-auto mb-2" />
+                            <p className="text-sm">Camera not active</p>
+                            <p className="text-xs">Select camera and start stream</p>
+                          </div>
                         </div>
                       )}
                     </div>
-                    
-                    <div className="flex items-center gap-2">
-                      <Button
-                        onClick={() => {
-                          if (isConnected) {
-                            moveServoToPosition(servoId, Math.max(0, currentPosition - 100));
-                          }
-                        }}
-                        disabled={isLoading || !isConnected}
-                        variant="outline"
-                        size="sm"
-                        className="w-10 h-10 p-0"
-                      >
-                        <Minus className="h-4 w-4" />
-                      </Button>
-                      
-                      <div className="flex-1 min-w-[200px]">
-                        <Slider
-                          value={[currentPosition]}
-                          onValueChange={(value) => {
-                            if (isConnected) {
-                              moveServoToPosition(servoId, value[0]);
-                            }
-                          }}
-                          max={4095}
-                          min={0}
-                          step={1}
-                          className="w-full"
-                        />
-                        <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                          <span>0</span>
-                          <span>2048</span>
-                          <span>4095</span>
-                        </div>
-                      </div>
-                      
-                      <Button
-                        onClick={() => {
-                          if (isConnected) {
-                            moveServoToPosition(servoId, Math.min(4095, currentPosition + 100));
-                          }
-                        }}
-                        disabled={isLoading || !isConnected}
-                        variant="outline"
-                        size="sm"
-                        className="w-10 h-10 p-0"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    
-                    <div className="w-16 text-center">
-                      <div className={`w-3 h-3 rounded-full mx-auto mb-1 ${
-                        isConnected ? 'bg-green-500' : 'bg-red-500'
-                      }`}></div>
-                      <div className="text-xs text-gray-600">
-                        {isConnected ? 'Connected' : 'Offline'}
-                      </div>
-                    </div>
                   </div>
-                );
-              })}
+                </div>
+              </div>
             </CardContent>
           </Card>
         )}
