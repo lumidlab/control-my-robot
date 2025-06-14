@@ -42,17 +42,14 @@ export default function Home() {
     checkWebSerialSupport();
   }, []);
 
-  const requestPort = async () => {
+  const connectToServo = async () => {
     if (!isWebSerialSupported) return;
 
     try {
       setIsLoading(true);
       setError(null);
       
-      // Request port selection from user
-      const port = await navigator.serial.requestPort();
-      
-      // Try to connect with the selected port
+      // Let the SDK handle port selection internally
       await scsServoSDK.connect();
       setIsConnected(true);
       
@@ -138,14 +135,14 @@ export default function Home() {
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
           <h3 className="text-blue-800 font-semibold mb-2">Connect to Servo</h3>
           <p className="text-blue-700 mb-4">
-            Click the button below to select a serial port and connect to your Feetech servo.
+            Click the button below to connect to your Feetech servo. You'll be prompted to select a serial port.
           </p>
           <button
-            onClick={requestPort}
+            onClick={connectToServo}
             disabled={isLoading}
             className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-2 px-4 rounded"
           >
-            {isLoading ? 'Connecting...' : 'Select Port & Connect'}
+            {isLoading ? 'Connecting...' : 'Connect to Servo'}
           </button>
         </div>
       )}
